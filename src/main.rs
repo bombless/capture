@@ -1,23 +1,16 @@
-use std::ops::Index;
-
+#[derive(PartialEq, Eq, Debug)]
 enum Parsing {
     Slice(String),
     Group(Box<Parsing>),
     Segment(Vec<Parsing>),
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 struct State {
-    groups: Vec<String>
+    groups: Vec<String>,
+    history: String,
 }
 
-impl State {
-    fn new() -> Self {
-        Self {
-            groups: Vec::new(),
-        }
-    }
-}
 /*
 
 plain = [^()]+
@@ -60,6 +53,8 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
     }
     if segments.is_empty() {
         None
+    } else if segments.len() == 1 {
+        Some((offset, segments.pop().unwrap()))
     } else {
         Some((offset, Parsing::Segment(segments)))
     }
@@ -90,7 +85,7 @@ fn parse_group(pattern: &str) -> Option<(usize, Parsing)> {
     }
     if let Some((n, rs)) = parse_content(&pattern[1..]) {
         if pattern.bytes().len() > 1 + n && pattern.as_bytes()[1+n] == b')' {
-            return Some((2 + n, rs));
+            return Some((2 + n, Parsing::Group(Box::new(rs))));
         }
     }
     None
@@ -101,60 +96,53 @@ impl Parsing {
         parse_pattern(pattern)
     }
     fn parse(&self, tokens: &str) -> Option<Vec<String>> {
-        if let Ok((n, rs)) = self.parse_helper(State::default(), tokens, 0) {
+        if let Ok((n, rs)) = self.parse_helper(State::default(), tokens) {
             if tokens.bytes().len() == n {
                 return Some(rs.groups)
             }
         }
         None
     }
-    fn parse_helper(&self, mut state: State, tokens: &str, capture_depth: u32) -> Result<(usize, State), State> {
+    fn parse_helper(&self, state: State, tokens: &str) -> Result<(usize, State), State> {
         match self {
             Parsing::Slice(slice) => if tokens.starts_with(slice) {
-                for _ in 0 .. capture_depth {
-                    state.groups.push(slice.into())
-                }
-                Ok((slice.bytes().len(), state))
+                Ok((slice.bytes().len(), State { history: slice.into(), ..state }))
             } else {
                 Err(state)
             },
             Parsing::Group(group) => {
-                group.parse_helper(state, tokens, capture_depth + 1)
+                let rs = group.parse_helper(state, tokens); 
+                if let Ok((n, mut ok)) = rs {
+                    ok.groups.push(ok.history.clone());
+                    Ok((n, ok))
+                } else {
+                    rs
+                }
             }
             Parsing::Segment(segment) => {
-                let mut segment_groups = Vec::new();
-                let mut depth = None;
+                let mut groups = Vec::new();
+                let mut history = String::new();
                 let mut offset = 0;
                 for s in segment {
-                    let (n, state) = s.parse_helper(state.clone(), &tokens[offset..], capture_depth)?;
+                    let (n, state) = s.parse_helper(state.clone(), &tokens[offset..])?;
                     offset += n;
-                    if let Some(depth) = depth {
-                        if depth != state.groups.len() {
-                            panic!()
-                        }
-                    } else {
-                        depth = Some(state.groups.len());
-                    }
-                    segment_groups.push(state.groups);
+                    history.push_str(&state.history);
+                    groups.extend(state.groups);
                 }
-                for i in 0 .. segment_groups[0].len() {
-                    let mut s = String::new();
-                    for j in 0 .. segment_groups.len() {
-                        s.push_str(&*segment_groups[j][i])
-                    }
-                    state.groups.push(s);
-                }
-                Ok((offset, state))
+                Ok((offset, State { history, groups }))
             }
         }
     }
 }
 
 fn main() {
-    // assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
-    // assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
-    // assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
+    assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
+    assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
+    assert_eq!(Parsing::new("(abc)").unwrap(), Parsing::Group(Box::new(Parsing::Slice("abc".into()))));
+    assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
     let parser = Parsing::new("(abc)").unwrap();
     let rs = parser.parse("abc").unwrap();
     assert_eq!(rs, ["abc"]);
+
+    assert_eq!(Parsing::new("(a)b(c)").unwrap().parse("abc").unwrap(), ["a", "c"]);
 }
