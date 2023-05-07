@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+static LITERAL_SPECIAL: &'static [char] = &['(', ')', '{', '}', '+', '*', '?', '[', ']'];
+
 #[derive(PartialEq, Eq, Debug)]
 enum Parsing {
     Slice(String),
@@ -132,20 +134,37 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
 
 fn parse_plain(pattern: &str) -> Option<(usize, Parsing)> {
     let mut plain = String::new();
-    for (offset, c) in pattern.char_indices() {
-        if ['(', ')', '{', '}', '+', '*', '?', '[', ']'].iter().any(|&x| x == c) {
-            if offset > 0 {
-                return Some((offset, Parsing::Slice(plain.into())));
+    let mut escaping = false;
+    let mut offset = 0;
+    for (this_offset, c) in pattern.char_indices() {
+        offset = this_offset;
+        if c == '\\' {
+            if escaping {
+                plain.push(c);
+                escaping = false;
+            } else {
+                escaping = true;
+            }
+            continue;
+        }
+        if LITERAL_SPECIAL.iter().any(|&x| x == c) {
+            if escaping {
+                plain.push(c);
+                escaping = false;
+                continue;
+            }
+            else if offset > 0 {
+                return Some((offset, Parsing::Slice(plain)));
             } else {
                 return None;
             }
         }
         plain.push(c);
     }
-    if plain.is_empty() {
+    if plain.is_empty() || escaping {
         return None;
     } else {
-        return Some((plain.bytes().len(), Parsing::Slice(plain.into())));
+        return Some((offset + 1, Parsing::Slice(plain)));
     }
 }
 
@@ -181,7 +200,16 @@ fn parse_set(pattern: &str) -> Option<(usize, Parsing)> {
         if c == ']' {
             return Some((offset + 1, Parsing::Set(Set(mode, set))));
         }
-        set.insert(c);
+        if c == '\\' {
+            let c = iter.next()?.1;
+            if ['[', ']'].iter().any(|&x| x == c) {
+                set.insert(c);
+            } else {
+                return None;
+            }
+        } else {
+            set.insert(c);
+        }
     }
 }
 
@@ -346,5 +374,16 @@ fn main() {
     let parse_number = Parsing::new("([123456789][0123456789]*)").unwrap();
     assert_eq!(parse_number.parse("01"), None);
     assert_eq!(parse_number.parse("42"), Some(vec!["42".into()]));
+
+    assert_eq!(Parsing::new("(\\(\\\\)").unwrap().parse("(\\").unwrap(), ["(\\"]);
+
+    let greedy_parser = Parsing::new("(a+)a").unwrap();
+
+    let rs = greedy_parser.parse("aa");
+
+    assert_eq!(rs, Some(vec!["a".into()]));
+
+    assert_eq!(Parsing::new("(\\([\\[\\]]+)\\]").unwrap().parse("(]]]").unwrap(), ["(]]"]);
+
 
 }
