@@ -233,26 +233,26 @@ fn segment<const N: usize>(s: [Parsing; N]) -> Parsing {
     Parsing::Segment(s.into())
 }
 
-fn main() {    
-    // assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
-    // assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
-    // assert_eq!(Parsing::new("(abc)").unwrap(), Parsing::Group(Box::new(Parsing::Slice("abc".into()))));
-    // assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
-    // let parser = Parsing::new("(abc)").unwrap();
-    // let rs = parser.parse("abc").unwrap();
-    // assert_eq!(rs, ["abc"]);
+fn main() {
+    assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
+    assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
+    assert_eq!(Parsing::new("(abc)").unwrap(), Parsing::Group(Box::new(Parsing::Slice("abc".into()))));
+    assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
+    let parser = Parsing::new("(abc)").unwrap();
+    let rs = parser.parse("abc").unwrap();
+    assert_eq!(rs, ["abc"]);
 
-    // assert_eq!(Parsing::new("(a)b(c)").unwrap().parse("abc").unwrap(), ["a", "c"]);
+    assert_eq!(Parsing::new("(a)b(c)").unwrap().parse("abc").unwrap(), ["a", "c"]);
 
-    // assert_eq!(Parsing::new("a{1,}").unwrap(), repeat(1, u32::MAX, slice("a")));
+    assert_eq!(Parsing::new("a{1,}").unwrap(), repeat(1, u32::MAX, slice("a")));
 
-    // let maybe_parsing = Parsing::new("(a{,})");
-    // let parsing = maybe_parsing.unwrap();
-    // assert_eq!(parsing, group(repeat(0, u32::MAX, slice("a"))));
-    // assert_eq!(parsing.parse("a").unwrap(), ["a"]);
+    let maybe_parsing = Parsing::new("(a{,})");
+    let parsing = maybe_parsing.unwrap();
+    assert_eq!(parsing, group(repeat(0, u32::MAX, slice("a"))));
+    assert_eq!(parsing.parse("a").unwrap(), ["a"]);
 
     let maybe_parsing = Parsing::new("(a{,})b");
     let parsing = maybe_parsing.unwrap();
     assert_eq!(parsing, segment([group(repeat(0, u32::MAX, slice("a"))), slice("b")]));
-    assert_eq!(parsing.parse("a").unwrap(), ["a"]);
+    assert_eq!(parsing.parse("ab").unwrap(), ["a"]);
 }
