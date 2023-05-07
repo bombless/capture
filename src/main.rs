@@ -90,7 +90,7 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
 fn parse_plain(pattern: &str) -> Option<(usize, Parsing)> {
     let mut plain = String::new();
     for (offset, c) in pattern.char_indices() {
-        if c == '(' || c == ')' || c == '{' || c == '}' {
+        if ['(', ')', '{', '}', '+', '*', '?'].iter().any(|&x| x == c) {
             if offset > 0 {
                 return Some((offset, Parsing::Slice(plain.into())));
             } else {
@@ -143,6 +143,13 @@ fn parse_number(input: &str) -> Option<(usize, u32)> {
 }
 
 fn parse_repeat(pattern: &str, ele: impl FnOnce()->Parsing) -> Option<(usize, Parsing)> {
+    match pattern.chars().next() {
+        Some('{') => {},
+        Some('+') => return Some((1, Parsing::Repeat(1, u32::MAX, Box::new(ele())))),
+        Some('*') => return Some((1, Parsing::Repeat(0, u32::MAX, Box::new(ele())))),
+        Some('?') => return Some((1, Parsing::Repeat(0, 1, Box::new(ele())))),
+        _ => return None,
+    }
     if pattern.chars().next() != Some('{') {
         return None;
     }
@@ -201,7 +208,7 @@ impl Parsing {
                 let mut offset = 0;
                 let mut groups = Vec::new();
                 let mut count = 0;
-                for _ in 0 ..= *uppper_bound {
+                for _ in 0 .. *uppper_bound {
                     if let Ok((n, state)) = parsing.parse_helper(State::default(), &tokens[offset..]) {
                         offset += n;
                         count += 1;
@@ -255,4 +262,10 @@ fn main() {
     let parsing = maybe_parsing.unwrap();
     assert_eq!(parsing, segment([group(repeat(0, u32::MAX, slice("a"))), slice("b")]));
     assert_eq!(parsing.parse("ab").unwrap(), ["a"]);
+
+    let maybe_parsing = Parsing::new("(a?b)c");
+    let parsing = maybe_parsing.unwrap();
+    assert_eq!(parsing, segment([group(segment([repeat(0, 1, slice("a")), slice("b")])), slice("c")]));
+    assert_eq!(parsing.parse("bc").unwrap(), ["b"]);
+    assert_eq!(parsing.parse("aabc"), None);
 }
