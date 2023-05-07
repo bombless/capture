@@ -8,7 +8,6 @@ enum Parsing {
 #[derive(Debug, Clone, Default)]
 struct State {
     groups: Vec<String>,
-    history: String,
 }
 
 /*
@@ -106,14 +105,14 @@ impl Parsing {
     fn parse_helper(&self, state: State, tokens: &str) -> Result<(usize, State), State> {
         match self {
             Parsing::Slice(slice) => if tokens.starts_with(slice) {
-                Ok((slice.bytes().len(), State { history: slice.into(), ..state }))
+                Ok((slice.bytes().len(), state))
             } else {
                 Err(state)
             },
             Parsing::Group(group) => {
                 let rs = group.parse_helper(state, tokens); 
                 if let Ok((n, mut ok)) = rs {
-                    ok.groups.push(ok.history.clone());
+                    ok.groups.push(tokens[..n].into());
                     Ok((n, ok))
                 } else {
                     rs
@@ -121,15 +120,13 @@ impl Parsing {
             }
             Parsing::Segment(segment) => {
                 let mut groups = Vec::new();
-                let mut history = String::new();
                 let mut offset = 0;
                 for s in segment {
                     let (n, state) = s.parse_helper(state.clone(), &tokens[offset..])?;
                     offset += n;
-                    history.push_str(&state.history);
                     groups.extend(state.groups);
                 }
-                Ok((offset, State { history, groups }))
+                Ok((offset, State { groups, ..state }))
             }
         }
     }
