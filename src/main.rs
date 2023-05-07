@@ -1,9 +1,30 @@
+use std::collections::HashSet;
+
 #[derive(PartialEq, Eq, Debug)]
 enum Parsing {
     Slice(String),
     Group(Box<Parsing>),
     Repeat(u32, u32, Box<Parsing>),
     Segment(Vec<Parsing>),
+    Set(Set),
+}
+
+#[derive(Eq, PartialEq, Debug)]
+struct Set(IncludeMode, HashSet<char>);
+
+impl Set {
+    fn includes(&self, c: char) -> bool {
+        match &self.0 {
+            IncludeMode::Include => self.1.contains(&c),
+            IncludeMode::Exclude => !self.1.contains(&c),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug)]
+enum IncludeMode {
+    Include,
+    Exclude,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -14,7 +35,7 @@ struct State {
 /*
 
 plain = [^()]+
-content = (plain | group)+
+content = (plain | group | set)+
 group = '(' content ')'
  */
 
@@ -29,12 +50,16 @@ fn parse_pattern(pattern: &str) -> Option<Parsing> {
 
 fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
     let mut offset = 0;
-    let mut error_existed = false;
+    let mut error_plain = false;
+    let mut error_group = false;
+    let mut error_set = false;
     let mut segments = Vec::new();
     loop {
         if let Some((n, mut rs)) = parse_plain(&pattern[offset..]) {
             offset += n;
-            error_existed = false;
+            error_plain = false;
+            error_group = false;
+            error_set = false;
             let mut empty_slice = false;
             if let Some((n, repeat)) = parse_repeat(&pattern[offset..], || {
                 let c = match &mut rs {
@@ -57,25 +82,43 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
             } else {
                 segments.push(rs);
             }
-        } else if error_existed {
+        } else if error_plain {
             break;
         } else {
-            error_existed = true;
+            error_plain = true;
+        }
+        fn handle_repeat(pattern: &str, offset: &mut usize, rs: Parsing) -> Parsing {
+            let mut rs = Some(rs);
+            if let Some((n, rs)) = parse_repeat(&pattern[*offset..], || rs.take().unwrap()) {
+                *offset += n;
+                rs
+            } else {
+                rs.take().unwrap()
+            }
         }
         if let Some((n, rs)) = parse_group(&pattern[offset..]) {
             offset += n;
-            error_existed = false;
-            let mut rs = Some(rs);
-            if let Some((n, rs)) = parse_repeat(&pattern[offset..], || rs.take().unwrap()) {
-                offset += n;
-                segments.push(rs);
-            } else {
-                segments.push(rs.take().unwrap());
-            }
-        } else if error_existed {
+            error_plain = false;
+            error_group = false;
+            error_set = false;
+            let rs = handle_repeat(pattern, &mut offset, rs);
+            segments.push(rs);
+        } else if error_group {
             break;
         } else {
-            error_existed = true;
+            error_group = true;
+        }
+        if let Some((n, rs)) = parse_set(&pattern[offset..]) {
+            offset += n;
+            error_plain = false;
+            error_group = false;
+            error_set = false;
+            let rs = handle_repeat(pattern, &mut offset, rs);
+            segments.push(rs);
+        } else if error_set {
+            break;
+        } else {
+            error_set = true;
         }
     }
     if segments.is_empty() {
@@ -90,7 +133,7 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
 fn parse_plain(pattern: &str) -> Option<(usize, Parsing)> {
     let mut plain = String::new();
     for (offset, c) in pattern.char_indices() {
-        if ['(', ')', '{', '}', '+', '*', '?'].iter().any(|&x| x == c) {
+        if ['(', ')', '{', '}', '+', '*', '?', '[', ']'].iter().any(|&x| x == c) {
             if offset > 0 {
                 return Some((offset, Parsing::Slice(plain.into())));
             } else {
@@ -116,6 +159,30 @@ fn parse_group(pattern: &str) -> Option<(usize, Parsing)> {
         }
     }
     None
+}
+
+fn parse_set(pattern: &str) -> Option<(usize, Parsing)> {
+    let mut iter = pattern.char_indices();
+    match iter.next() {
+        Some((_, '[')) => {},
+        _ => return None,
+    }
+    
+    let mut set = HashSet::new();
+    let first = iter.next()?.1;
+    let mode = if first == '^' {
+        IncludeMode::Exclude
+    } else {
+        set.insert(first);
+        IncludeMode::Include
+    };
+    loop {
+        let (offset, c) = iter.next()?;
+        if c == ']' {
+            return Some((offset + 1, Parsing::Set(Set(mode, set))));
+        }
+        set.insert(c);
+    }
 }
 
 fn parse_number(input: &str) -> Option<(usize, u32)> {
@@ -182,6 +249,11 @@ impl Parsing {
         match self {
             Parsing::Slice(slice) => if tokens.starts_with(slice) {
                 Ok((slice.bytes().len(), state))
+            } else {
+                Err(state)
+            },
+            Parsing::Set(set) => if tokens.chars().next().map_or(false, |x| set.includes(x)) {
+                Ok((1, state))
             } else {
                 Err(state)
             },
@@ -268,4 +340,11 @@ fn main() {
     assert_eq!(parsing, segment([group(segment([repeat(0, 1, slice("a")), slice("b")])), slice("c")]));
     assert_eq!(parsing.parse("bc").unwrap(), ["b"]);
     assert_eq!(parsing.parse("aabc"), None);
+
+    Parsing::new("[0][1]").unwrap();
+
+    let parse_number = Parsing::new("([123456789][0123456789]*)").unwrap();
+    assert_eq!(parse_number.parse("01"), None);
+    assert_eq!(parse_number.parse("42"), Some(vec!["42".into()]));
+
 }
