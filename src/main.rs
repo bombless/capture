@@ -90,7 +90,7 @@ fn parse_content(pattern: &str) -> Option<(usize, Parsing)> {
 fn parse_plain(pattern: &str) -> Option<(usize, Parsing)> {
     let mut plain = String::new();
     for (offset, c) in pattern.char_indices() {
-        if c == '(' || c == ')' {
+        if c == '(' || c == ')' || c == '{' || c == '}' {
             if offset > 0 {
                 return Some((offset, Parsing::Slice(plain.into())));
             } else {
@@ -120,7 +120,8 @@ fn parse_group(pattern: &str) -> Option<(usize, Parsing)> {
 
 fn parse_number(input: &str) -> Option<(usize, u32)> {
     let mut bytes = input.bytes();
-    let mut i = if let Some(i) = bytes.next() {
+    let first = bytes.next();
+    let mut i = if let Some(i) = first {
         if !(i >= b'0' && i <= b'9') { return None; }
         (i - b'0') as u32
     } else {
@@ -145,17 +146,17 @@ fn parse_repeat(pattern: &str, ele: impl FnOnce()->Parsing) -> Option<(usize, Pa
     if pattern.chars().next() != Some('{') {
         return None;
     }
-    let (offset, lower_bound) = parse_number(pattern).unwrap_or_default();
+    let (offset, lower_bound) = parse_number(&pattern[1..]).unwrap_or_default();
     if pattern[1+offset..].chars().next() != Some(',') {
         return None;
     }
-    let (offset_add, upper_bound) = parse_number(&pattern[1+offset..]).unwrap_or_else(|| (0, u32::MAX));
+    let (offset_add, upper_bound) = parse_number(&pattern[1+offset+1..]).unwrap_or_else(|| (0, u32::MAX));
     
-    if pattern[1+offset+offset_add..].chars().next() != Some('}') {
+    if pattern[1+offset+1+offset_add..].chars().next() != Some('}') {
         return None;
     }
 
-    Some((1+offset+offset_add+1, Parsing::Repeat(lower_bound, upper_bound, Box::new(ele()))))
+    Some((1+offset+1+offset_add+1, Parsing::Repeat(lower_bound, upper_bound, Box::new(ele()))))
 }
 
 impl Parsing {
@@ -219,14 +220,39 @@ impl Parsing {
     }
 }
 
-fn main() {
-    assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
-    assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
-    assert_eq!(Parsing::new("(abc)").unwrap(), Parsing::Group(Box::new(Parsing::Slice("abc".into()))));
-    assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
-    let parser = Parsing::new("(abc)").unwrap();
-    let rs = parser.parse("abc").unwrap();
-    assert_eq!(rs, ["abc"]);
+fn group(p: Parsing) -> Parsing {
+    Parsing::Group(Box::new(p))
+}
+fn repeat(lower_bound: u32, upper_bound: u32, p: Parsing) -> Parsing {
+    Parsing::Repeat(lower_bound, upper_bound, Box::new(p))
+}
+fn slice(s: &str) -> Parsing {
+    Parsing::Slice(s.into())
+}
+fn segment<const N: usize>(s: [Parsing; N]) -> Parsing {
+    Parsing::Segment(s.into())
+}
 
-    assert_eq!(Parsing::new("(a)b(c)").unwrap().parse("abc").unwrap(), ["a", "c"]);
+fn main() {    
+    // assert_eq!(Parsing::Slice("abc".into()).parse("abc"), Some(vec![]));
+    // assert_eq!(Parsing::Group(Box::new(Parsing::Slice("abc".into()))).parse("abc"), Some(vec!["abc".into()]));
+    // assert_eq!(Parsing::new("(abc)").unwrap(), Parsing::Group(Box::new(Parsing::Slice("abc".into()))));
+    // assert_eq!(Parsing::new("abc").unwrap().parse("abc"), Some(vec![]));
+    // let parser = Parsing::new("(abc)").unwrap();
+    // let rs = parser.parse("abc").unwrap();
+    // assert_eq!(rs, ["abc"]);
+
+    // assert_eq!(Parsing::new("(a)b(c)").unwrap().parse("abc").unwrap(), ["a", "c"]);
+
+    // assert_eq!(Parsing::new("a{1,}").unwrap(), repeat(1, u32::MAX, slice("a")));
+
+    // let maybe_parsing = Parsing::new("(a{,})");
+    // let parsing = maybe_parsing.unwrap();
+    // assert_eq!(parsing, group(repeat(0, u32::MAX, slice("a"))));
+    // assert_eq!(parsing.parse("a").unwrap(), ["a"]);
+
+    let maybe_parsing = Parsing::new("(a{,})b");
+    let parsing = maybe_parsing.unwrap();
+    assert_eq!(parsing, segment([group(repeat(0, u32::MAX, slice("a"))), slice("b")]));
+    assert_eq!(parsing.parse("a").unwrap(), ["a"]);
 }
