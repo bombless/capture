@@ -1,8 +1,11 @@
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::collections::VecDeque;
 
 static LITERAL_SPECIAL: &'static [char] = &['(', ')', '{', '}', '+', '*', '?', '[', ']'];
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash)]
 enum Parsing {
     Slice(String),
     Group(Box<Parsing>),
@@ -23,15 +26,84 @@ impl Set {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+impl Hash for Set {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+        let mut v = self.1.iter().collect::<Vec<_>>();
+        v.sort();
+        v.hash(state);
+    }
+}
+
+
+
+#[derive(Eq, PartialEq, Debug, Hash)]
 enum IncludeMode {
     Include,
     Exclude,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
+struct RepeatItem {
+    offset: usize,
+    repeat: u32,
+    lower_bound: u32,
+    upper_bound: u32,
+    parsing: Parsing,
+}
+
+#[derive(Default, Debug)]
+struct RepeatEntry(Vec<RepeatItem>);
+
+struct RepeatHistory(HashSet<RepeatEntry>);
+
+#[derive(Debug, Default)]
 struct State {
     groups: Vec<String>,
+    history: RepeatEntry,
+}
+
+struct Collector {
+    current: Option<VecDeque<(u32, u32, u64)>>,
+    history: Vec<VecDeque<(u32, u32, u64)>>,
+}
+
+impl Collector {
+    fn collect(&mut self, lower: u32, upper: u32, obj: &Parsing) {
+
+        if self.current.is_none() {
+            self.current = Some(VecDeque::new());
+        }
+
+        let mut hasher = DefaultHasher::new();
+        obj.hash(&mut hasher);
+
+        self.current.as_mut().unwrap().push_back((lower, upper, hasher.finish()));
+    }
+    fn done(&mut self) {
+        self.history.push(self.current.take().unwrap())
+    }
+    fn into_planner(self) -> Planner {
+        Planner { current: self.current, pool: self.history }
+    }
+}
+
+struct Planner {
+    current: Option<VecDeque<(u32, u32, u64)>>,
+    pool: Vec<VecDeque<(u32, u32, u64)>>,
+}
+
+impl Planner {
+    fn next(&mut self) -> Option<(u32, u32, u64)> {
+        self.current.as_mut()?.pop_front()
+    }
+    fn done(&mut self) -> bool {
+        if self.pool.is_empty() {
+            return false;
+        }
+        self.current = self.pool.pop();
+        true
+    }
 }
 
 /*
